@@ -1,0 +1,65 @@
+require("dotenv").config();
+const TelegramBot = require("node-telegram-bot-api");
+const db = require("./db");
+const keyboards = require("./keyboards");
+const fs = require("fs");
+const path = require("path");
+
+// Create bot instance
+const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
+
+// ✅ Global Force-Check (middleware for all messages)
+bot.on("message", async (msg) => {
+  const chatId = msg.chat.id;
+  const telegramId = msg.from.id;
+
+  try {
+    // Ensure user exists in DB
+    const [rows] = await db.query("SELECT * FROM users WHERE tg_id = ?", [telegramId]);
+
+    if (rows.length === 0) {
+      await db.query("INSERT INTO users (tg_id, balance, status) VALUES (?, 0, 'active')", [
+        telegramId,
+      ]);
+      console.log(`👤 New user added: ${telegramId}`);
+    }
+
+    // 🚨 Example force check: banned users
+    if (rows.length > 0 && rows[0].status === "banned") {
+      return bot.sendMessage(chatId, "🚫 You are banned from using this bot.");
+    }
+
+    // 🚨 Example force check: force join channel
+    if (process.env.FORCE_CHANNEL) {
+      try {
+        const member = await bot.getChatMember(process.env.FORCE_CHANNEL, telegramId);
+        if (member.status === "left" || member.status === "kicked") {
+          return bot.sendMessage(
+            chatId,
+            `⚠️ You must join our channel first: ${process.env.FORCE_CHANNEL}`
+          );
+        }
+      } catch (err) {
+        console.error("Force join check error:", err.message);
+      }
+    }
+
+    // ✅ If all checks passed → other handlers will run
+  } catch (error) {
+    console.error("Global check error:", error);
+    bot.sendMessage(chatId, "⚠️ Something went wrong. Please try again later.");
+  }
+});
+
+// ✅ Auto-load all handlers from /handlers
+const handlersPath = path.join(__dirname, "handlers");
+fs.readdirSync(handlersPath).forEach((file) => {
+  if (file.endsWith(".js")) {
+    const handler = require(path.join(handlersPath, file));
+    if (typeof handler === "function") {
+      handler(bot, db, keyboards); // inject bot, db, keyboards
+    }
+  }
+});
+
+console.log("✅ Bot is running...");

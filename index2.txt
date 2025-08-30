@@ -1,0 +1,65 @@
+// handlers/start.js
+module.exports = (bot, db, keyboards, withAccess) => {
+  bot.onText(/\/start(?:\s+(.+))?/, withAccess(async (msg, match) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from.id;
+    const firstName = msg.from.first_name || "";
+    const lastName = msg.from.last_name || "";
+    const username = msg.from.username || "";
+
+    // Extract referral code if any
+    const payload = match && match[1] ? match[1].trim() : null;
+    const refDigits = payload ? payload.match(/(\d{5,})/) : null;
+    const rawReferrerId = refDigits ? parseInt(refDigits[1], 10) : null;
+
+    try {
+      // Check if user exists
+      const [rows] = await db.query("SELECT tg_id, referrer FROM users WHERE tg_id = ? LIMIT 1", [telegramId]);
+
+      if (rows.length === 0) {
+        // NEW user → Insert directly
+        let referrerToSet = null;
+        if (rawReferrerId && rawReferrerId !== telegramId) {
+          const [refRows] = await db.query("SELECT tg_id FROM users WHERE tg_id = ? LIMIT 1", [rawReferrerId]);
+          if (refRows.length > 0) referrerToSet = rawReferrerId;
+        }
+
+        await db.query(
+          `INSERT INTO users (tg_id, username, first_name, last_name, balance, withdrawn, gems, gold, referrer)
+           VALUES (?, ?, ?, ?, 0, 0, 0, 5, ?)`,
+          [telegramId, username, firstName, lastName, referrerToSet]
+        );
+
+        // Reward referrer if valid
+        if (referrerToSet) {
+          await db.query("UPDATE users SET gold = gold + 1 WHERE tg_id = ?", [referrerToSet]);
+          bot.sendMessage(referrerToSet, "🎉 You earned +1 🪙 Gold! A new friend joined using your referral link.");
+        }
+
+        bot.sendMessage(chatId, `👋 Welcome ${firstName || "friend"}! You are registered as a new user.`, keyboards.mainMenu);
+      } else {
+        // Existing user → just update profile
+        await db.query(
+          `UPDATE users SET username = ?, first_name = ?, last_name = ? WHERE tg_id = ?`,
+          [username, firstName, lastName, telegramId]
+        );
+
+        // Handle referrer if not set yet
+        const alreadyHasRef = rows[0].referrer !== null;
+        if (!alreadyHasRef && rawReferrerId && rawReferrerId !== telegramId) {
+          const [refRows] = await db.query("SELECT tg_id FROM users WHERE tg_id = ? LIMIT 1", [rawReferrerId]);
+          if (refRows.length > 0) {
+            await db.query("UPDATE users SET referrer = ? WHERE tg_id = ?", [rawReferrerId, telegramId]);
+            await db.query("UPDATE users SET gold = gold + 1 WHERE tg_id = ?", [rawReferrerId]);
+            bot.sendMessage(rawReferrerId, "🎉 You earned +1 🪙 Gold! A new friend joined using your referral link.");
+          }
+        }
+
+        bot.sendMessage(chatId, `👋 Welcome back ${firstName || "friend"}!`, keyboards.mainMenu);
+      }
+    } catch (err) {
+      console.error("❌ Error in /start:", err);
+      bot.sendMessage(chatId, "⚠️ Something went wrong, please try again later.");
+    }
+  }));
+};
