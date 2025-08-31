@@ -10,9 +10,9 @@ module.exports = (bot) => {
 
     const inlineKeyboard = {
       inline_keyboard: [
-        [{ text: "📢 Official Channel", url: "https://t.me/YourChannelHere" }],
+        [{ text: "📢 Official Channel", url: "https://t.me/TronBees" }],
         [{ text: "📖 Manual", url: "https://t.me/YourManualHere" }],
-        [{ text: "💬 Help Chat", url: "https://t.me/YourHelpChatHere" }],
+        [{ text: "💰 Payment Channel", url: "https://t.me/Bees_Payments" }],
       ],
     };
 
@@ -38,3 +38,4 @@ module.exports = (bot) => {
     }
   });
 };
+
