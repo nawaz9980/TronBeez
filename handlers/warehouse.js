@@ -12,48 +12,48 @@ const ROBOTS = {
 
 const moment = require("moment-timezone"); // npm install moment-timezone
 
-// Helper: get IST timestamp string
+// Helpers
 function nowISTString() {
   return moment().tz("Asia/Kolkata").format("YYYY-MM-DD HH:mm:ss");
 }
 
-// Helper: get IST Unix time
 function nowISTUnix() {
   return moment().tz("Asia/Kolkata").unix();
 }
 
 module.exports = (bot, db) => {
-  // Handler function for warehouse logic
   async function showWarehouse(msg) {
     const chatId = msg.chat.id;
     const tgId = msg.from.id;
 
     try {
-      // Ensure user has a robots row
+      // Ensure robots row exists
       await db.query(
         `INSERT INTO robots (tg_id) VALUES (?) 
          ON DUPLICATE KEY UPDATE tg_id = tg_id`,
         [tgId]
       );
 
-      // Fetch user robots
+      // Fetch robots
       const [rows] = await db.query(`SELECT * FROM robots WHERE tg_id = ?`, [tgId]);
       const userRobots = rows[0];
-
       if (!userRobots) {
         return bot.sendMessage(chatId, "❌ You don't own any robots yet. Use /buyrobot first.");
       }
 
       // Fetch last collection
-      const [users] = await db.query(`SELECT last_collected FROM users WHERE tg_id = ?`, [tgId]);
+      const [users] = await db.query(
+        `SELECT last_collected FROM users WHERE tg_id = ?`,
+        [tgId]
+      );
 
       const now = nowISTUnix();
 
+      // Parse last collected safely
       let lastCollected = users[0]?.last_collected
-        ? moment.tz(users[0].last_collected, "Asia/Kolkata").unix()
+        ? moment.tz(users[0].last_collected, "YYYY-MM-DD HH:mm:ss", "Asia/Kolkata").unix()
         : now;
 
-      // If no record, set last_collected to now in IST
       if (!users[0]?.last_collected) {
         await db.query(`UPDATE users SET last_collected = ? WHERE tg_id = ?`, [
           nowISTString(),
@@ -65,7 +65,7 @@ module.exports = (bot, db) => {
       let elapsed = Math.max(0, now - lastCollected);
       if (elapsed > 7200) elapsed = 7200; // cap at 2h
 
-      // Calculate gems earned
+      // Calculate gems
       const gemsEarned = {};
       let totalGems = 0;
       for (let i = 1; i <= 9; i++) {
@@ -76,19 +76,15 @@ module.exports = (bot, db) => {
         totalGems += gemsEarned[i];
       }
 
-      // Build warehouse message
+      // Build message
       let message = `🏭 *Your Warehouse*\n\nYour robots are mining gems in the warehouse.\nThey stop extracting after *two hour(s)*.\nCollect regularly to maximize your profits.\n\n⸻\n\n`;
-
       for (let i = 1; i <= 9; i++) {
         const count = parseInt(userRobots[`robot${i}`] ?? 0, 10) || 0;
         message += ` • Robot ${i} (${count}): ${gemsEarned[i]} 💎\n`;
       }
 
-      // Inline button to collect gems
       const inlineKeyboard = {
-        inline_keyboard: [
-          [{ text: `💎 Collect Gems (${totalGems})`, callback_data: `collect_gems` }]
-        ]
+        inline_keyboard: [[{ text: `💎 Collect Gems (${totalGems})`, callback_data: `collect_gems` }]],
       };
 
       bot.sendMessage(chatId, message, { parse_mode: "Markdown", reply_markup: inlineKeyboard });
@@ -98,17 +94,17 @@ module.exports = (bot, db) => {
     }
   }
 
-  // 1. /warehouse slash command
+  // Slash command
   bot.onText(/\/warehouse/, showWarehouse);
 
-  // 2. 🗃 emoji as a stand-alone message (no slash)
+  // Emoji trigger
   bot.on("message", (msg) => {
     if (msg.text && msg.text.trim() === "🗃 Warehouse") {
       showWarehouse(msg);
     }
   });
 
-  // Handle Collect Gems button
+  // Collect Gems
   bot.on("callback_query", async (query) => {
     const chatId = query.message.chat.id;
     const tgId = query.from.id;
@@ -119,17 +115,20 @@ module.exports = (bot, db) => {
         const [robotRows] = await db.query(`SELECT * FROM robots WHERE tg_id = ?`, [tgId]);
         const userRobots = robotRows[0];
 
-        const [users] = await db.query(`SELECT last_collected, gems FROM users WHERE tg_id = ?`, [tgId]);
-        const now = nowISTUnix();
+        const [users] = await db.query(
+          `SELECT last_collected, gems FROM users WHERE tg_id = ?`,
+          [tgId]
+        );
 
+        const now = nowISTUnix();
         let lastCollected = users[0]?.last_collected
-          ? moment.tz(users[0].last_collected, "Asia/Kolkata").unix()
+          ? moment.tz(users[0].last_collected, "YYYY-MM-DD HH:mm:ss", "Asia/Kolkata").unix()
           : now;
 
         let elapsed = Math.max(0, now - lastCollected);
-        if (elapsed > 7200) elapsed = 7200; // cap at 2h
+        if (elapsed > 7200) elapsed = 7200;
 
-        // Calculate gems earned
+        // Calculate gems
         let totalGems = 0;
         for (let i = 1; i <= 9; i++) {
           const count = parseInt(userRobots[`robot${i}`] ?? 0, 10) || 0;
@@ -146,7 +145,7 @@ module.exports = (bot, db) => {
         const currentGems = users[0]?.gems ?? 0;
         const newGems = currentGems + totalGems;
 
-        // Update user's gems and reset last_collected
+        // Save IST timestamp explicitly
         await db.query(`UPDATE users SET gems = ?, last_collected = ? WHERE tg_id = ?`, [
           newGems,
           nowISTString(),
@@ -158,12 +157,8 @@ module.exports = (bot, db) => {
         bot.sendMessage(
           chatId,
           `✅ Successfully collected gems!\n\nCurrent gems: *${newGems} 💎*`,
-          {
-            parse_mode: "Markdown",
-            reply_markup: { inline_keyboard: [[{ text: "✅ OK", callback_data: "ok" }]] }
-          }
+          { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "✅ OK", callback_data: "ok" }]] } }
         );
-
       } catch (err) {
         console.error("Error collecting gems:", err);
         await bot.answerCallbackQuery(query.id, { text: "⚠️ Error collecting gems.", show_alert: true });
