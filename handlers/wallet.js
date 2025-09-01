@@ -75,7 +75,7 @@ module.exports = (bot, db) => {
           const walletAddress = msg.text.trim();
 
           try {
-            const apiKey = "234f93dea46ead9b5ad92b3fcc521d8920dfbb7e95b97859ec2c4749442078d2"; // replace with your FaucetPay API key
+            const apiKey = "9af523f56d91c65ab98a4beb0bb45da074eb45cd3f31c989ab0d130839c35688"; // replace with your FaucetPay API key
 
             // POST request to validate wallet
             const response = await axios.post(
